@@ -18,7 +18,11 @@ import storage
 
 import main_foreng
 
-log = logger.get_logger(__name__) if hasattr(logger, 'get_logger') else logger
+log = logger.get_logger(__name__)
+
+
+def ui_error_message(text: str) -> str:
+    return f"Ошибка: {text}"
 
 
 def get_image_base64(filename):
@@ -171,9 +175,9 @@ def main(page: ft.Page):
     async def send_email_click(e):
         await refresh_connectivity_status()
         if not is_online:
-            sidebar_status_text.value = "Интернет недоступен. Отправка email запрещена."
+            sidebar_status_text.value = ui_error_message("интернет недоступен. Отправка email запрещена.")
             sidebar_status_text.color = ft.colors.ERROR
-            page.snack_bar = ft.SnackBar(ft.Text("Нет интернета: email не отправлен."), bgcolor=ft.colors.ERROR)
+            page.snack_bar = ft.SnackBar(ft.Text(ui_error_message("нет интернета: email не отправлен.")), bgcolor=ft.colors.ERROR)
             page.snack_bar.open = True
             page.update()
             return
@@ -205,7 +209,7 @@ def main(page: ft.Page):
             sidebar_status_text.color = ft.colors.GREEN
             page.snack_bar = ft.SnackBar(ft.Text("Отчет отправлен по email."), bgcolor=ft.colors.GREEN)
         except Exception as exc:
-            message = f"Не удалось отправить email: {exc}"
+            message = ui_error_message(f"не удалось отправить email: {exc}")
             log_to_gui(f"❌ {message}", ft.colors.RED)
             sidebar_status_text.value = message
             sidebar_status_text.color = ft.colors.RED
@@ -264,7 +268,7 @@ def main(page: ft.Page):
     async def run_logic(e):
         nonlocal latest_online_report, latest_offline_report
         if not name_field.value or not problem_field.value:
-            page.snack_bar = ft.SnackBar(ft.Text("Ошибка: Заполните ФИО и Описание проблемы!"), bgcolor=ft.colors.ERROR)
+            page.snack_bar = ft.SnackBar(ft.Text(ui_error_message("заполните ФИО и описание проблемы!")), bgcolor=ft.colors.ERROR)
             page.snack_bar.open = True
             page.update()
             return
@@ -388,8 +392,8 @@ def main(page: ft.Page):
                 btn_generate_qr.disabled = True
 
         except Exception as e:
-            log_to_gui(f"Критическая ошибка: {e}", ft.colors.RED)
-            sidebar_status_text.value = "Произошла ошибка!"
+            log_to_gui(f"❌ {ui_error_message(f'критическая ошибка: {e}')}", ft.colors.RED)
+            sidebar_status_text.value = ui_error_message("произошла ошибка при диагностике")
             sidebar_status_text.color = ft.colors.RED
         finally:
             await refresh_connectivity_status()

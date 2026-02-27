@@ -6,16 +6,21 @@ import socket
 import psutil
 from datetime import datetime
 import functools
-import platform
 import subprocess
 import base64
 
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-
 import system_net_tools as snt
-import config 
+import config
+import logger
+import email_sender
+
+
+log = logger.get_logger(__name__)
+
+
+def ui_error_message(text: str) -> str:
+    return f"Ошибка: {text}"
+
 
 def get_image_base64(filename):
     try:
@@ -33,28 +38,6 @@ async def run_in_thread(func, *args, **kwargs):
     loop = asyncio.get_running_loop()
     pfunc = functools.partial(func, *args, **kwargs)
     return await loop.run_in_executor(None, pfunc)
-
-def send_smtp_email_sync(ticket_num, body_text):
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = config.SMTP_LOGIN
-        msg['To'] = config.DESTINATION_EMAIL
-        msg['Subject'] = f"Диагностика рабочего места по заявке {ticket_num}"
-        
-        msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
-        
-        if config.SMTP_PORT == 465:
-            server = smtplib.SMTP_SSL(config.SMTP_SERVER, config.SMTP_PORT)
-        else:
-            server = smtplib.SMTP(config.SMTP_SERVER, config.SMTP_PORT)
-            server.starttls() 
-            
-        server.login(config.SMTP_LOGIN, config.SMTP_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        return True, "Успешно"
-    except Exception as ex:
-        return False, str(ex)
 
 def get_engineer_content(page: ft.Page):
     # --- ПРЕДОХРАНИТЕЛЬ ---
@@ -104,8 +87,8 @@ def get_engineer_content(page: ft.Page):
     async def send_email_log(e):
         ticket_num = ticket_input.value.strip()
         if not ticket_num:
-            log_to_eng_term("❌ Ошибка: Укажите номер заявки перед отправкой!")
-            page.snack_bar = ft.SnackBar(ft.Text("Пожалуйста, введите номер заявки!"), bgcolor=ft.colors.ERROR)
+            log_to_eng_term(f"❌ {ui_error_message('укажите номер заявки перед отправкой!')}")
+            page.snack_bar = ft.SnackBar(ft.Text(ui_error_message("пожалуйста, введите номер заявки!")), bgcolor=ft.colors.ERROR)
             page.snack_bar.open = True
             page.update()
             return
@@ -135,21 +118,27 @@ def get_engineer_content(page: ft.Page):
             f"{terminal_text}\n"
         )
 
-        success, msg = await run_in_thread(send_smtp_email_sync, ticket_num, report_text)
-        
-        e.control.disabled = False
-        eng_progress.visible = False
-        
-        if success:
+        try:
+            await run_in_thread(
+                email_sender.send_report_smtp,
+                f"Диагностика рабочего места по заявке {ticket_num}",
+                report_text,
+                "engineer_report.txt",
+                report_text.encode("utf-8"),
+            )
             log_to_eng_term(f"✅ Лог успешно отправлен в заявку {ticket_num} на {config.DESTINATION_EMAIL}")
             page.snack_bar = ft.SnackBar(ft.Text("Письмо успешно отправлено!"), bgcolor=ft.colors.GREEN)
-            ticket_input.value = "" 
-        else:
-            log_to_eng_term(f"❌ Ошибка отправки почты: {msg}")
-            page.snack_bar = ft.SnackBar(ft.Text("Ошибка отправки письма! Проверьте терминал."), bgcolor=ft.colors.ERROR)
-            
-        page.snack_bar.open = True
-        page.update()
+            ticket_input.value = ""
+        except Exception as ex:
+            message = ui_error_message(f"ошибка отправки почты: {ex}")
+            log_to_eng_term(f"❌ {message}")
+            log.error(message)
+            page.snack_bar = ft.SnackBar(ft.Text(message), bgcolor=ft.colors.ERROR)
+        finally:
+            e.control.disabled = False
+            eng_progress.visible = False
+            page.snack_bar.open = True
+            page.update()
 
     def save_engineer_log(e):
         date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -187,7 +176,9 @@ def get_engineer_content(page: ft.Page):
             page.snack_bar.open = True
             page.update()
         except Exception as ex:
-            log_to_eng_term(f"❌ Ошибка при сохранении лога: {ex}")
+            message = ui_error_message(f"ошибка при сохранении лога: {ex}")
+            log_to_eng_term(f"❌ {message}")
+            log.error(message)
 
     async def gather_pc_info(e):
         e.control.disabled = True
@@ -257,7 +248,9 @@ MAC-адрес                 : {mac_addr}
             info_textbox.value = report
 
         except Exception as ex:
-            info_textbox.value = f"Ошибка при сборе данных: {ex}"
+            message = ui_error_message(f"ошибка при сборе данных: {ex}")
+            info_textbox.value = message
+            log.error(message)
         finally:
             e.control.disabled = False
             eng_progress.visible = False
