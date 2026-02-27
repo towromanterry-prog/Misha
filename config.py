@@ -17,3 +17,6 @@ SMTP_PORT = 465                         # Обычно 465 для SSL или 587
 SMTP_LOGIN = "your_email@domain.ru"     # Почта, с которой будет идти отправка
 SMTP_PASSWORD = "your_app_password"     # Пароль (или пароль приложения, если включена 2FA)
 DESTINATION_EMAIL = "itsm@domain.ru"    # Почта системы заявок (куда отправляем)
+
+# --- OFFLINE QR MAILTO ---
+MAIL_TO = os.getenv("MAIL_TO", DESTINATION_EMAIL)

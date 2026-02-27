@@ -7,11 +7,13 @@ from datetime import datetime
 import functools
 import base64
 import json
+from io import BytesIO
 
 import config
 import system_net_tools as snt
 import logger
 import report_builder
+import qr_tools
 
 import main_foreng
 
@@ -217,9 +219,26 @@ def main(page: ft.Page):
                 page.update()
                 log_to_gui(">>> Трассировка до 77.88.8.8 (первые 5 хопов)...", ft.colors.BLUE)
                 report = await run_in_thread(report_builder.build_offline_hops_report)
+
+                max_body_len = 1600
+                report_for_mail = report if len(report) <= max_body_len else report[: max_body_len - 22].rstrip() + "\n\n[TRUNCATED]"
+                if len(report_for_mail) < len(report):
+                    log_to_gui("⚠️ Текст отчета для mailto был безопасно сокращен.", ft.colors.ORANGE)
+
+                mailto_url = qr_tools.build_mailto(
+                    config.MAIL_TO,
+                    "AURORA.GERMES OFFLINE",
+                    report_for_mail,
+                )
+                qr_pil = qr_tools.generate_qr_image(mailto_url)
+                qr_buffer = BytesIO()
+                qr_pil.save(qr_buffer, format="PNG")
+                qr_image.src_base64 = base64.b64encode(qr_buffer.getvalue()).decode("utf-8")
+                qr_image.visible = True
+
                 filepath, filename = save_diagnostic_report(report, name_field.value)
                 log_to_gui(f"✅ Отчет сохранен: {filename}", ft.colors.GREEN)
-                sidebar_status_text.value = "⚠️ Нет связи. Отчет сохранен локально."
+                sidebar_status_text.value = "⚠️ Нет связи. Отчет сохранен локально и QR для mailto сформирован."
                 sidebar_status_text.color = ft.colors.ERROR
             else:
                 progress_text.value = "Сбор сетевых настроек и полная маршрутизация..."
