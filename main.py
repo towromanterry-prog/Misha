@@ -3,16 +3,13 @@ import asyncio
 import os
 import sys
 import socket
-import requests
 from datetime import datetime
 import functools
 import base64
-from io import BytesIO
 import json
 
 import config
 import system_net_tools as snt
-import qr_tools
 import logger
 
 import main_foreng
@@ -161,20 +158,6 @@ def main(page: ft.Page):
             f.write(report_text)
         return file_path, filename
 
-    async def send_to_telegram(text):
-        url = f"https://api.telegram.org/bot{config.TG_TOKEN}/sendMessage"
-        payload = {"chat_id": config.TG_CHAT_ID, "text": text}
-        try:
-            response = await run_in_thread(requests.post, url, data=payload, timeout=10)
-            if response.status_code == 200:
-                log_to_gui("Данные успешно доставлены в Telegram.", ft.colors.GREEN)
-                sidebar_status_text.value = "✅ Данные успешно отправлены инженеру!"
-                sidebar_status_text.color = ft.colors.GREEN
-            else:
-                log_to_gui(f"Ошибка отправки в TG: {response.text}", ft.colors.RED)
-        except Exception as e:
-            log_to_gui(f"Ошибка соединения с Telegram: {e}", ft.colors.RED)
-
     async def run_logic(e):
         if not name_field.value or not problem_field.value:
             page.snack_bar = ft.SnackBar(ft.Text("Ошибка: Заполните ФИО и Описание проблемы!"), bgcolor=ft.colors.ERROR)
@@ -238,16 +221,8 @@ def main(page: ft.Page):
                 report = f"""🆘 OFFLINE (СЦЕНАРИЙ 3)\n👤 {name_field.value}\n🏢 {company_field.value or 'Не указана'}\n📞 {phone_field.value or 'Не указан'}\nЛокальный IP: {local_ip}\n\n[АКТИВНЫЙ АДАПТЕР (0.0.0.0)]\n{adapters_status.strip()}\n\n--- ТРАССИРОВКА (5 ХОПОВ ДО 77.88.8.8) ---\n{trace_5_hops.strip()}\n"""
                 filepath, filename = save_diagnostic_report(report, name_field.value)
                 log_to_gui(f"✅ Отчет сохранен: {filename}", ft.colors.GREEN)
-                log_to_gui("Генерация QR-кода...", ft.colors.ORANGE)
-                qr_pil_img = await run_in_thread(qr_tools.generate_telegram_qr, report, config.TG_TOKEN, config.TG_CHAT_ID)
-                if qr_pil_img:
-                    buffered = BytesIO()
-                    qr_pil_img.save(buffered, format="PNG")
-                    qr_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                    qr_image.src_base64 = qr_base64
-                    qr_image.visible = True
-                    sidebar_status_text.value = "⚠️ Нет связи!\nНаведите камеру смартфона на QR-код для отправки заявки."
-                    sidebar_status_text.color = ft.colors.ERROR
+                sidebar_status_text.value = "⚠️ Нет связи. Отчет сохранен локально."
+                sidebar_status_text.color = ft.colors.ERROR
             else:
                 progress_text.value = "Сбор сетевых настроек и полная маршрутизация..."
                 page.update()
@@ -277,8 +252,8 @@ def main(page: ft.Page):
                 report = f"""{header_text}\n👤 {name_field.value}\n🏢 {company_field.value or 'Не указана'}\n📞 {phone_field.value or 'Не указан'}\n🎫 ITSM логин: {itsm_field.value or 'Нет'}\n📝 Проблема: {problem_field.value}\n🆔 ID Удаленного доступа: {anydesk_field.value or 'Нет'}\n💻 {pc_name}\nЛокальный IP: {local_ip} | Внешний IP: {ext_ip}\nMAC: {mac_addr}\nDomain: {domain_info}\nGW: {gateway}\nDC: {dc_name}\n\n[ПИНГИ]\nGW: {ping_gw} | DC: {ping_dc}\n8.8.8.8: {ping_8888} | 1.1.1.1: {ping_1111}\nNSLookup ya.ru: {nslookup_res}\n{scenario_2_traces}\n--- ОСНОВНОЙ TRACE WAN (MTR YA.RU) ---\n{trace_res}\n"""
                 filepath, filename = save_diagnostic_report(report, name_field.value)
                 log_to_gui(f"Отчет сохранен: {filename}", ft.colors.GREEN)
-                log_to_gui("Отправка отчета в Telegram...")
-                await send_to_telegram(report)
+                sidebar_status_text.value = "✅ Диагностика завершена. Отчет сохранен локально."
+                sidebar_status_text.color = ft.colors.GREEN
 
         except Exception as e:
             log_to_gui(f"Критическая ошибка: {e}", ft.colors.RED)

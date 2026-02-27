@@ -5,11 +5,6 @@ from dotenv import load_dotenv
 # Загружаем переменные окружения из .env файла (если он существует)
 load_dotenv()
 
-# --- НАСТРОЙКИ ТЕЛЕГРАМ ---
-# Используем переменные окружения, или значения по умолчанию
-TG_TOKEN = os.getenv("TG_TOKEN", "8535163666:AAEFA4H5P3iaHPlwv7nw1ts3d27yesyNeo8")
-TG_CHAT_ID = os.getenv("TG_CHAT_ID", "883807173")
-
 # --- НАСТРОЙКИ ИНТЕРФЕЙСА ---
 THEME_MODE = "light"      # "light", "dark", "system"
 THEME_COLOR = "blue"      # "blue", "green", "dark-blue"
