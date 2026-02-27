@@ -5,7 +5,11 @@ import platform
 import re
 import psutil
 import os
-import subprocess
+
+
+ALLOWED_SHELL_COMMANDS = {
+    "netstat -ano | findstr LISTENING",
+}
 
 # --- СЛОВАРЬ С ПУТЯМИ К ПРОГРАММАМ УДАЛЕННОГО ДОСТУПА ---
 # Программа проверит все варианты путей (x86, x64, AppData пользователя)
@@ -46,44 +50,54 @@ def scan_remote_apps():
                     break # Переходим к следующей программе, если эта уже найдена
     return found_apps
 
-def run_command(command, timeout_sec=15):
-    """
-    Выполняет системную команду и возвращает результат.
-    Объединяет stdout и stderr, использует умное декодирование от кракозябр
-    и сохраняет частичный вывод при таймауте.
-    """
+def decode_command_output(raw_output):
+    """Декодирует байты консольного вывода: utf-8 -> cp866 -> cp1251."""
+    raw_output = raw_output or b""
+    for encoding in ("utf-8", "cp866", "cp1251"):
+        try:
+            return raw_output.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw_output.decode("cp1251", errors="replace")
+
+
+def run_command_args(args: list[str], timeout_sec: int = 15) -> str:
+    """Безопасный запуск команды списком аргументов (shell=False)."""
     try:
-        # Получаем СЫРЫЕ байты (без text=True и encoding), чтобы декодировать их вручную
         result = subprocess.run(
-            command,
-            shell=True,
+            args,
+            shell=False,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, 
+            stderr=subprocess.STDOUT,
             timeout=timeout_sec
         )
-        raw_output = result.stdout or b""
-        
-        # --- УМНОЕ ДЕКОДИРОВАНИЕ ---
-        try:
-            # 1. Сначала пробуем современный UTF-8
-            text = raw_output.decode('utf-8')
-        except UnicodeDecodeError:
-            try:
-                # 2. Если не вышло — классическая консольная кириллица Windows
-                text = raw_output.decode('cp866')
-            except UnicodeDecodeError:
-                # 3. Резервный вариант
-                text = raw_output.decode('cp1251', errors='replace')
-                
+        text = decode_command_output(result.stdout)
         return text.strip()
-        
+
     except subprocess.TimeoutExpired as e:
-        raw_output = e.stdout if e.stdout else b""
-        try:
-            text = raw_output.decode('utf-8')
-        except UnicodeDecodeError:
-            text = raw_output.decode('cp866', errors='replace')
-            
+        text = decode_command_output(e.stdout)
+        return f"{text.strip()}\n\n[!] Превышено время ожидания ({timeout_sec} сек.). Показан частичный результат."
+    except Exception as e:
+        return f"Ошибка выполнения команды: {str(e)}"
+
+
+def run_command_shell(cmd: str, timeout_sec: int = 15) -> str:
+    """Запуск shell-команды только из жестко зафиксированного списка."""
+    normalized_cmd = cmd.strip()
+    if normalized_cmd not in ALLOWED_SHELL_COMMANDS:
+        return "Ошибка выполнения команды: shell=True разрешён только для фиксированных команд"
+
+    try:
+        result = subprocess.run(
+            normalized_cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout_sec
+        )
+        return decode_command_output(result.stdout).strip()
+    except subprocess.TimeoutExpired as e:
+        text = decode_command_output(e.stdout)
         return f"{text.strip()}\n\n[!] Превышено время ожидания ({timeout_sec} сек.). Показан частичный результат."
     except Exception as e:
         return f"Ошибка выполнения команды: {str(e)}"
@@ -129,7 +143,7 @@ def get_mac_address():
 def get_gateway():
     """Определяет шлюз по умолчанию (Windows)"""
     if platform.system().lower() == "windows":
-        output = run_command("route print 0.0.0.0", timeout_sec=5)
+        output = run_command_args(["route", "print", "0.0.0.0"], timeout_sec=5)
         # Ищем строку вида "0.0.0.0   0.0.0.0   192.168.1.1"
         match = re.search(r'0\.0\.0\.0\s+0\.0\.0\.0\s+([0-9\.]+)', output)
         if match:
@@ -141,7 +155,7 @@ def get_domain_controller():
     if platform.system().lower() != "windows":
         return "Не найден (Не Windows)"
         
-    output = run_command("echo %LOGONSERVER%", timeout_sec=2)
+    output = os.environ.get("LOGONSERVER", "").strip()
     
     # Если ПК не в домене, он вернет саму строку "%LOGONSERVER%"
     if output and output.strip() != "%LOGONSERVER%":
@@ -154,10 +168,12 @@ def get_ping_status(host):
     if not host or host == "N/A" or host == "Не найден":
         return "N/A"
         
-    param = "-n 1" if platform.system().lower() == "windows" else "-c 1"
-    command = f"ping {param} {host}"
-    
-    output = run_command(command, timeout_sec=5)
+    if platform.system().lower() == "windows":
+        command_args = ["ping", "-n", "1", host]
+    else:
+        command_args = ["ping", "-c", "1", host]
+
+    output = run_command_args(command_args, timeout_sec=5)
     
     if "TTL=" in output or "ttl=" in output.lower():
         return "OK"
@@ -171,18 +187,17 @@ def run_mtr(host="ya.ru", duration=15):
     timeout = duration + 5 # Даем запас времени сверх указанной длительности
     
     if platform.system().lower() == "windows":
-        result = run_command(f"mtr -r -c {duration} {host}", timeout_sec=timeout)
+        result = run_command_args(["mtr", "-r", "-c", str(duration), host], timeout_sec=timeout)
         
         # Перехватываем сообщение Windows об отсутствии утилиты
         if not result or "не является" in result.lower() or "not recognized" in result.lower():
             # Запускаем tracert: -d (без DNS имен), -h 15 (прыжков), -w 1000 (таймаут 1 сек)
-            fallback_cmd = f"tracert -d -h 15 -w 1000 {host}"
-            # Для tracert даем побольше времени (25 сек), так как он работает последовательно
-            return run_command(fallback_cmd, timeout_sec=25)
+            fallback_cmd = ["tracert", "-d", "-h", "15", "-w", "1000", host]
+            return run_command_args(fallback_cmd, timeout_sec=25)
         return result
     else:
         # Для Linux / macOS (тут mtr обычно есть)
-        return run_command(f"mtr -r -c {duration} {host}", timeout_sec=timeout)
+        return run_command_args(["mtr", "-r", "-c", str(duration), host], timeout_sec=timeout)
 
 def launch_app(app_path):
     """Асинхронный запуск программы без блокировки основного окна"""
@@ -197,14 +212,13 @@ def get_default_adapter_info():
     """Возвращает информацию только об адаптере с маршрутом 0.0.0.0 (шлюзом по умолчанию)"""
     if platform.system().lower() == "windows":
         # Используем PowerShell: находим маршрут 0.0.0.0, берем его индекс и выводим свойства адаптера
-        cmd = (
-            "powershell -NoProfile -Command "
-            "\"$route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Select-Object -First 1; "
+        script = (
+            "$route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Select-Object -First 1; "
             "if ($route) { "
             "Get-NetAdapter -InterfaceIndex $route.ifIndex | Format-List Name, InterfaceDescription, Status "
             "} else { "
             "Write-Output 'Адаптер с маршрутом 0.0.0.0 (шлюзом по умолчанию) не найден.' "
-            "}\""
+            "}"
         )
-        return run_command(cmd, timeout_sec=15)
+        return run_command_args(["powershell", "-NoProfile", "-Command", script], timeout_sec=15)
     return "Не поддерживается на данной ОС"

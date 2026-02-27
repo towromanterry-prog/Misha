@@ -212,16 +212,13 @@ def get_engineer_content(page: ft.Page):
             domain_info = await run_in_thread(snt.get_domain_controller)
             gateway = await run_in_thread(snt.get_gateway)
             
-            fw_cmd = "netsh advfirewall show allprofiles state"
-            firewall_status = await run_in_thread(snt.run_command, fw_cmd, 5)
+            firewall_status = await run_in_thread(snt.run_command_args, ["netsh", "advfirewall", "show", "allprofiles", "state"], 5)
             fw_clean = "Включен" if "ON" in firewall_status.upper() or "ВКЛ" in firewall_status.upper() else "Отключен или не удалось определить"
 
-            av_cmd = 'powershell -NoProfile -Command "Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct | Select-Object -ExpandProperty displayName"'
-            av_status = await run_in_thread(snt.run_command, av_cmd, 5)
+            av_status = await run_in_thread(snt.run_command_args, ["powershell", "-NoProfile", "-Command", "Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct | Select-Object -ExpandProperty displayName"], 5)
             if not av_status: av_status = "Не найден (или Windows Defender)"
 
-            upd_cmd = 'powershell -NoProfile -Command "(Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn"'
-            last_update = await run_in_thread(snt.run_command, upd_cmd, 10)
+            last_update = await run_in_thread(snt.run_command_args, ["powershell", "-NoProfile", "-Command", "(Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn"], 10)
 
             boot_time = datetime.fromtimestamp(psutil.boot_time())
             uptime = datetime.now() - boot_time
@@ -235,7 +232,7 @@ def get_engineer_content(page: ft.Page):
             if dc_name:
                 info_textbox.value += "\nВыполнение трассировки до Домен-контроллера...\n"
                 page.update()
-                trace_dc = await run_in_thread(snt.run_command, f"tracert -d -h 5 -w 1000 {dc_name}", 15)
+                trace_dc = await run_in_thread(snt.run_command_args, ["tracert", "-d", "-h", "5", "-w", "1000", dc_name], 15)
 
             report = f"""[ ИНФОРМАЦИЯ О ПК И СИСТЕМЕ ]
 Залогиненный пользователь : {logged_user}
@@ -268,35 +265,35 @@ MAC-адрес                 : {mac_addr}
 
     def open_event_viewer(e):
         log_to_eng_term("Запуск Просмотра событий (eventvwr.msc)...")
-        subprocess.Popen(["eventvwr.msc"], shell=True)
+        subprocess.Popen(["eventvwr.msc"], shell=False)
 
     async def run_route_print(e):
         log_to_eng_term("Выполнение route print...")
-        res = await run_in_thread(snt.run_command, "route print", 10)
+        res = await run_in_thread(snt.run_command_args, ["route", "print"], 10)
         log_to_eng_term(f"Результат:\n{res}")
 
     async def run_netstat(e):
         log_to_eng_term("Получение прослушиваемых портов...")
-        res = await run_in_thread(snt.run_command, "netstat -ano | findstr LISTENING", 10)
+        res = await run_in_thread(snt.run_command_shell, "netstat -ano | findstr LISTENING", 10)
         log_to_eng_term(f"Результат (LISTENING):\n{res}")
 
     async def run_custom_ping(e):
         target = target_input.value.strip()
         if not target: return
         log_to_eng_term(f"Выполнение ping {target}...")
-        res = await run_in_thread(snt.run_command, f"ping {target}", 15)
+        res = await run_in_thread(snt.run_command_args, ["ping", target], 15)
         log_to_eng_term(f"Результат:\n{res}")
 
     async def run_custom_tracert(e):
         target = target_input.value.strip()
         if not target: return
         log_to_eng_term(f"Выполнение tracert -d {target}...")
-        res = await run_in_thread(snt.run_command, f"tracert -d {target}", 30)
+        res = await run_in_thread(snt.run_command_args, ["tracert", "-d", target], 30)
         log_to_eng_term(f"Результат:\n{res}")
 
     async def run_flushdns(e):
         log_to_eng_term("Выполнение ipconfig /flushdns...")
-        res = await run_in_thread(snt.run_command, "ipconfig /flushdns", 5)
+        res = await run_in_thread(snt.run_command_args, ["ipconfig", "/flushdns"], 5)
         log_to_eng_term(f"Результат:\n{res}")
 
     btn_style = ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=4))

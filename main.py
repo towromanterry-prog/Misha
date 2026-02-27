@@ -217,7 +217,7 @@ def main(page: ft.Page):
                 log_to_gui(">>> Поиск активного адаптера (0.0.0.0)...", ft.colors.BLUE)
                 adapters_status = await run_in_thread(snt.get_default_adapter_info)
                 log_to_gui(">>> Трассировка до 77.88.8.8 (первые 5 хопов)...", ft.colors.BLUE)
-                trace_5_hops = await run_in_thread(snt.run_command, "tracert -d -h 5 -w 1000 77.88.8.8", 25)
+                trace_5_hops = await run_in_thread(snt.run_command_args, ["tracert", "-d", "-h", "5", "-w", "1000", "77.88.8.8"], 25)
                 report = f"""🆘 OFFLINE (СЦЕНАРИЙ 3)\n👤 {name_field.value}\n🏢 {company_field.value or 'Не указана'}\n📞 {phone_field.value or 'Не указан'}\nЛокальный IP: {local_ip}\n\n[АКТИВНЫЙ АДАПТЕР (0.0.0.0)]\n{adapters_status.strip()}\n\n--- ТРАССИРОВКА (5 ХОПОВ ДО 77.88.8.8) ---\n{trace_5_hops.strip()}\n"""
                 filepath, filename = save_diagnostic_report(report, name_field.value)
                 log_to_gui(f"✅ Отчет сохранен: {filename}", ft.colors.GREEN)
@@ -235,14 +235,14 @@ def main(page: ft.Page):
                 ping_1111 = await run_in_thread(snt.get_ping_status, "1.1.1.1")
                 dc_name = domain_info.split()[0] if domain_info and "Не найден" not in domain_info else "N/A"
                 ping_dc = await run_in_thread(snt.get_ping_status, dc_name) if dc_name != "N/A" else "N/A"
-                nslookup_raw = await run_in_thread(snt.run_command, "nslookup ya.ru")
+                nslookup_raw = await run_in_thread(snt.run_command_args, ["nslookup", "ya.ru"])
                 nslookup_res = "OK" if "Address" in nslookup_raw else "Error"
 
                 scenario_2_traces = ""
                 if scenario == 2:
                     for fh in failed_hosts:
                         log_to_gui(f">>> Трассировка до недоступного узла: {fh}...", ft.colors.ORANGE)
-                        fh_trace = await run_in_thread(snt.run_command, f"tracert -d -h 15 -w 1000 {fh}")
+                        fh_trace = await run_in_thread(snt.run_command_args, ["tracert", "-d", "-h", "15", "-w", "1000", fh], 25)
                         scenario_2_traces += f"\n--- TRACE ДО {fh.upper()} ---\n{fh_trace}\n"
 
                 log_to_gui(">>> Запуск основного MTR до ya.ru...", ft.colors.BLUE)

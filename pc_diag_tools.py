@@ -112,15 +112,15 @@ def find_vpn_linux():
     """Ищет ВПН клиентов на Linux"""
     vpn_found = []
     vpn_commands = {
-        'OpenVPN': 'which openvpn',
-        'WireGuard': 'which wg',
-        'strongSwan': 'which ipsec',
-        'L2TP': 'which xl2tpd',
+        'OpenVPN': ['which', 'openvpn'],
+        'WireGuard': ['which', 'wg'],
+        'strongSwan': ['which', 'ipsec'],
+        'L2TP': ['which', 'xl2tpd'],
     }
     
     try:
         for vpn_name, cmd in vpn_commands.items():
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(cmd, shell=False, capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 vpn_found.append(f"✅ {vpn_name} (установлен)")
                 log.info(f"Найден ВПН клиент на Linux: {vpn_name}")
@@ -229,17 +229,17 @@ def find_antivirus_linux():
     """Ищет антивирусные программы на Linux"""
     antivirus_found = []
     antivirus_packages = {
-        'ClamAV': 'which clamscan',
-        'AVG': 'which avgd',
-        'Sophos': 'which savdctl',
-        'F-Secure': 'which fsscan',
-        'ESET': 'which esets_scan',
-        'Kaspersky': 'which kav',
+        'ClamAV': ['which', 'clamscan'],
+        'AVG': ['which', 'avgd'],
+        'Sophos': ['which', 'savdctl'],
+        'F-Secure': ['which', 'fsscan'],
+        'ESET': ['which', 'esets_scan'],
+        'Kaspersky': ['which', 'kav'],
     }
     
     try:
         for av_name, cmd in antivirus_packages.items():
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(cmd, shell=False, capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 antivirus_found.append(f"✅ {av_name} (установлен)")
                 log.info(f"Найден антивирус на Linux: {av_name}")
