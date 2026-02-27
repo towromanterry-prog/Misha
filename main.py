@@ -11,6 +11,7 @@ import json
 import config
 import system_net_tools as snt
 import logger
+import report_builder
 
 import main_foreng
 
@@ -214,11 +215,8 @@ def main(page: ft.Page):
             if scenario == 3:
                 progress_text.value = "Сбор информации об адаптере 0.0.0.0 и трассировка..."
                 page.update()
-                log_to_gui(">>> Поиск активного адаптера (0.0.0.0)...", ft.colors.BLUE)
-                adapters_status = await run_in_thread(snt.get_default_adapter_info)
                 log_to_gui(">>> Трассировка до 77.88.8.8 (первые 5 хопов)...", ft.colors.BLUE)
-                trace_5_hops = await run_in_thread(snt.run_command_args, ["tracert", "-d", "-h", "5", "-w", "1000", "77.88.8.8"], 25)
-                report = f"""🆘 OFFLINE (СЦЕНАРИЙ 3)\n👤 {name_field.value}\n🏢 {company_field.value or 'Не указана'}\n📞 {phone_field.value or 'Не указан'}\nЛокальный IP: {local_ip}\n\n[АКТИВНЫЙ АДАПТЕР (0.0.0.0)]\n{adapters_status.strip()}\n\n--- ТРАССИРОВКА (5 ХОПОВ ДО 77.88.8.8) ---\n{trace_5_hops.strip()}\n"""
+                report = await run_in_thread(report_builder.build_offline_hops_report)
                 filepath, filename = save_diagnostic_report(report, name_field.value)
                 log_to_gui(f"✅ Отчет сохранен: {filename}", ft.colors.GREEN)
                 sidebar_status_text.value = "⚠️ Нет связи. Отчет сохранен локально."
@@ -238,18 +236,40 @@ def main(page: ft.Page):
                 nslookup_raw = await run_in_thread(snt.run_command_args, ["nslookup", "ya.ru"])
                 nslookup_res = "OK" if "Address" in nslookup_raw else "Error"
 
-                scenario_2_traces = ""
+                failed_host_traces = []
                 if scenario == 2:
                     for fh in failed_hosts:
                         log_to_gui(f">>> Трассировка до недоступного узла: {fh}...", ft.colors.ORANGE)
                         fh_trace = await run_in_thread(snt.run_command_args, ["tracert", "-d", "-h", "15", "-w", "1000", fh], 25)
-                        scenario_2_traces += f"\n--- TRACE ДО {fh.upper()} ---\n{fh_trace}\n"
+                        failed_host_traces.append({"host": fh, "trace": fh_trace})
 
                 log_to_gui(">>> Запуск основного MTR до ya.ru...", ft.colors.BLUE)
                 trace_res = await run_in_thread(snt.run_mtr, "ya.ru", 15)
 
-                header_text = "⚠️ ONLINE ЗАЯВКА (СЦЕНАРИЙ 2)" if scenario == 2 else "✅ ONLINE ЗАЯВКА (СЦЕНАРИЙ 1)"
-                report = f"""{header_text}\n👤 {name_field.value}\n🏢 {company_field.value or 'Не указана'}\n📞 {phone_field.value or 'Не указан'}\n🎫 ITSM логин: {itsm_field.value or 'Нет'}\n📝 Проблема: {problem_field.value}\n🆔 ID Удаленного доступа: {anydesk_field.value or 'Нет'}\n💻 {pc_name}\nЛокальный IP: {local_ip} | Внешний IP: {ext_ip}\nMAC: {mac_addr}\nDomain: {domain_info}\nGW: {gateway}\nDC: {dc_name}\n\n[ПИНГИ]\nGW: {ping_gw} | DC: {ping_dc}\n8.8.8.8: {ping_8888} | 1.1.1.1: {ping_1111}\nNSLookup ya.ru: {nslookup_res}\n{scenario_2_traces}\n--- ОСНОВНОЙ TRACE WAN (MTR YA.RU) ---\n{trace_res}\n"""
+                report_context = {
+                    "scenario": scenario,
+                    "name": name_field.value,
+                    "company": company_field.value,
+                    "phone": phone_field.value,
+                    "itsm": itsm_field.value,
+                    "problem": problem_field.value,
+                    "anydesk": anydesk_field.value,
+                    "pc_name": pc_name,
+                    "local_ip": local_ip,
+                    "ext_ip": ext_ip,
+                    "mac_addr": mac_addr,
+                    "domain_info": domain_info,
+                    "gateway": gateway,
+                    "dc_name": dc_name,
+                    "ping_gw": ping_gw,
+                    "ping_dc": ping_dc,
+                    "ping_8888": ping_8888,
+                    "ping_1111": ping_1111,
+                    "nslookup_res": nslookup_res,
+                    "failed_host_traces": failed_host_traces,
+                    "trace_res": trace_res,
+                }
+                report = report_builder.build_full_report(report_context)
                 filepath, filename = save_diagnostic_report(report, name_field.value)
                 log_to_gui(f"Отчет сохранен: {filename}", ft.colors.GREEN)
                 sidebar_status_text.value = "✅ Диагностика завершена. Отчет сохранен локально."
