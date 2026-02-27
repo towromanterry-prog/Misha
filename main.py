@@ -6,7 +6,6 @@ import socket
 from datetime import datetime
 import functools
 import base64
-import json
 from io import BytesIO
 
 import config
@@ -15,12 +14,12 @@ import logger
 import report_builder
 import qr_tools
 import email_sender
+import storage
 
 import main_foreng
 
 log = logger.get_logger(__name__) if hasattr(logger, 'get_logger') else logger
 
-PROFILE_FILE = "user_profile.json"
 
 def get_image_base64(filename):
     """Находит картинку в .exe и кодирует её в Base64"""
@@ -28,29 +27,12 @@ def get_image_base64(filename):
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
-    
+
     path = os.path.join(base_path, filename)
     if os.path.exists(path):
         with open(path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
-    return None # Возвращаем None, если картинка не найдена
-
-def load_user_profile():
-    if os.path.exists(PROFILE_FILE):
-        try:
-            with open(PROFILE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            if hasattr(log, 'error'): log.error(f"Ошибка чтения профиля: {e}")
-    return {}
-
-def save_user_profile(name, company, phone, itsm):
-    data = {"name": name, "company": company, "phone": phone, "itsm": itsm}
-    try:
-        with open(PROFILE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        if hasattr(log, 'error'): log.error(f"Ошибка сохранения профиля: {e}")
+            return base64.b64encode(image_file.read()).decode("utf-8")
+    return None
 
 async def run_in_thread(func, *args, **kwargs):
     loop = asyncio.get_running_loop()
@@ -68,7 +50,7 @@ def main(page: ft.Page):
         "RobotoMono": "https://github.com/google/fonts/raw/main/apache/robotomono/RobotoMono-Regular.ttf"
     }
 
-    user_profile = load_user_profile()
+    user_profile = storage.load_user_profile()
 
     # --- ЭЛЕМЕНТЫ ВКЛАДКИ "ДИАГНОСТИКА" ---
     contact_info = ft.Column([
@@ -182,15 +164,9 @@ def main(page: ft.Page):
         return failed_hosts
 
     def save_diagnostic_report(report_text, name):
-        date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         safe_name = "".join([c for c in name if c.isalpha() or c.isdigit() or c in " -_"]).rstrip()
-        filename = f"Диагностика_{date_str}_{safe_name}.txt"
-        logs_dir = os.path.join(os.getcwd(), "logs")
-        os.makedirs(logs_dir, exist_ok=True)
-        file_path = os.path.join(logs_dir, filename)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(report_text)
-        return file_path, filename
+        prefix = f"Диагностика_{safe_name}" if safe_name else "Диагностика"
+        return storage.save_text_report(report_text, prefix)
 
     async def send_email_click(e):
         await refresh_connectivity_status()
@@ -275,6 +251,16 @@ def main(page: ft.Page):
         page.snack_bar.open = True
         page.update()
 
+    def clear_profile_click(e):
+        storage.clear_user_profile()
+        name_field.value = ""
+        company_field.value = ""
+        phone_field.value = "+7"
+        itsm_field.value = ""
+        page.snack_bar = ft.SnackBar(ft.Text("Профиль очищен."), bgcolor=ft.colors.BLUE_GREY)
+        page.snack_bar.open = True
+        page.update()
+
     async def run_logic(e):
         nonlocal latest_online_report, latest_offline_report
         if not name_field.value or not problem_field.value:
@@ -282,7 +268,7 @@ def main(page: ft.Page):
             page.snack_bar.open = True
             page.update()
             return
-        save_user_profile(name_field.value, company_field.value, phone_field.value, itsm_field.value)
+        storage.save_user_profile({"name": name_field.value, "company": company_field.value, "phone": phone_field.value, "itsm": itsm_field.value})
         btn_submit.disabled = True
         progress_bar.visible = True
         progress_text.visible = True
@@ -417,12 +403,13 @@ def main(page: ft.Page):
     btn_submit = ft.ElevatedButton("Собрать данные и Отправить заявку", icon=ft.Icons.SEND, on_click=run_logic, style=ft.ButtonStyle(bgcolor=ft.colors.BLUE_700, color=ft.colors.WHITE, padding=20, shape=ft.RoundedRectangleBorder(radius=8)))
     btn_send_email = ft.ElevatedButton("Отправить email", icon=ft.Icons.EMAIL, disabled=True, on_click=send_email_click, style=ft.ButtonStyle(bgcolor=ft.colors.GREEN_700, color=ft.colors.WHITE, padding=20, shape=ft.RoundedRectangleBorder(radius=8)))
     btn_generate_qr = ft.ElevatedButton("Сгенерировать QR", icon=ft.Icons.QR_CODE, disabled=True, on_click=generate_qr_click, style=ft.ButtonStyle(bgcolor=ft.colors.ORANGE_700, color=ft.colors.WHITE, padding=20, shape=ft.RoundedRectangleBorder(radius=8)))
+    btn_clear_profile = ft.OutlinedButton("Очистить профиль", icon=ft.Icons.DELETE_OUTLINE, on_click=clear_profile_click)
 
     main_content = ft.Column([
         header_row, 
         welcome_text, ft.Divider(), remote_ui_section, ft.Divider(),
         ft.Row([name_field, company_field]), ft.Row([phone_field, itsm_field, anydesk_field]), problem_field, ft.Divider(),
-        ft.Column([ft.Row([btn_submit, btn_send_email, btn_generate_qr], wrap=True), ft.Row([progress_bar], alignment=ft.MainAxisAlignment.START), progress_text]),
+        ft.Column([ft.Row([btn_submit, btn_send_email, btn_generate_qr], wrap=True), ft.Row([btn_clear_profile], alignment=ft.MainAxisAlignment.START), ft.Row([progress_bar], alignment=ft.MainAxisAlignment.START), progress_text]),
         ft.Text("Терминал выполнения:", weight=ft.FontWeight.W_500), log_container
     ], expand=True, scroll=ft.ScrollMode.AUTO) 
 
