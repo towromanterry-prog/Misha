@@ -11,12 +11,35 @@ THEME_COLOR = "blue"      # "blue", "green", "dark-blue"
 APP_TITLE = "AURORA.GERMES"
 
 
-# --- НОВЫЕ ПАРАМЕТРЫ ДЛЯ ПОЧТЫ (SMTP) ---
-SMTP_SERVER = "smtp.yandex.ru"          # Замените на ваш SMTP сервер (например, smtp.mail.ru или корпоративный)
-SMTP_PORT = 465                         # Обычно 465 для SSL или 587 для TLS
-SMTP_LOGIN = "your_email@domain.ru"     # Почта, с которой будет идти отправка
-SMTP_PASSWORD = "your_app_password"     # Пароль (или пароль приложения, если включена 2FA)
-DESTINATION_EMAIL = "itsm@domain.ru"    # Почта системы заявок (куда отправляем)
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
-# --- OFFLINE QR MAILTO ---
-MAIL_TO = os.getenv("MAIL_TO", DESTINATION_EMAIL)
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+# --- ПАРАМЕТРЫ ПОЧТЫ (SMTP) ---
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = _env_int("SMTP_PORT", 465)
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+MAIL_TO = os.getenv("MAIL_TO", "")
+MAIL_FROM = os.getenv("MAIL_FROM", SMTP_USER)
+SMTP_USE_SSL = _env_bool("SMTP_USE_SSL", True)
+SMTP_USE_STARTTLS = _env_bool("SMTP_USE_STARTTLS", False)
+
+# --- Совместимость со старыми именами настроек ---
+SMTP_SERVER = SMTP_HOST
+SMTP_LOGIN = SMTP_USER
+SMTP_PASSWORD = SMTP_PASS
+DESTINATION_EMAIL = MAIL_TO

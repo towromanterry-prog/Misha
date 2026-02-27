@@ -14,6 +14,7 @@ import system_net_tools as snt
 import logger
 import report_builder
 import qr_tools
+import email_sender
 
 import main_foreng
 
@@ -150,6 +151,8 @@ def main(page: ft.Page):
         width=300, padding=20, border=ft.border.only(left=ft.border.BorderSide(1, ft.colors.OUTLINE)),
     )
 
+    latest_online_report = ""
+
     def save_diagnostic_report(report_text, name):
         date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         safe_name = "".join([c for c in name if c.isalpha() or c.isdigit() or c in " -_"]).rstrip()
@@ -161,7 +164,46 @@ def main(page: ft.Page):
             f.write(report_text)
         return file_path, filename
 
+    async def send_email_click(e):
+        if not latest_online_report:
+            page.snack_bar = ft.SnackBar(ft.Text("Нет онлайн-отчета для отправки."), bgcolor=ft.colors.ORANGE)
+            page.snack_bar.open = True
+            page.update()
+            return
+
+        btn_send_email.disabled = True
+        page.update()
+        try:
+            subject = f"AURORA.GERMES отчет: {name_field.value or 'Пользователь'}"
+            body = (
+                "Добрый день.\n"
+                "Во вложении полный диагностический отчет AURORA.GERMES.\n\n"
+                f"{latest_online_report}"
+            )
+            await run_in_thread(
+                email_sender.send_report_smtp,
+                subject,
+                body,
+                "report.txt",
+                latest_online_report.encode("utf-8"),
+            )
+            log_to_gui("✅ Отчет отправлен по email.", ft.colors.GREEN)
+            sidebar_status_text.value = "✅ Отчет отправлен по email."
+            sidebar_status_text.color = ft.colors.GREEN
+            page.snack_bar = ft.SnackBar(ft.Text("Отчет отправлен по email."), bgcolor=ft.colors.GREEN)
+        except Exception as exc:
+            message = f"Не удалось отправить email: {exc}"
+            log_to_gui(f"❌ {message}", ft.colors.RED)
+            sidebar_status_text.value = message
+            sidebar_status_text.color = ft.colors.RED
+            page.snack_bar = ft.SnackBar(ft.Text(message), bgcolor=ft.colors.ERROR)
+        finally:
+            btn_send_email.disabled = False
+            page.snack_bar.open = True
+            page.update()
+
     async def run_logic(e):
+        nonlocal latest_online_report
         if not name_field.value or not problem_field.value:
             page.snack_bar = ft.SnackBar(ft.Text("Ошибка: Заполните ФИО и Описание проблемы!"), bgcolor=ft.colors.ERROR)
             page.snack_bar.open = True
@@ -174,6 +216,8 @@ def main(page: ft.Page):
         log_view.controls.clear()
         qr_image.visible = False
         sidebar_status_text.value = "Выполнение диагностики..."
+        latest_online_report = ""
+        btn_send_email.disabled = True
         sidebar_status_text.color = ft.colors.ON_SURFACE_VARIANT
         log_to_gui("=== Запуск диагностики ===", ft.colors.BLUE)
         page.update()
@@ -240,6 +284,7 @@ def main(page: ft.Page):
                 log_to_gui(f"✅ Отчет сохранен: {filename}", ft.colors.GREEN)
                 sidebar_status_text.value = "⚠️ Нет связи. Отчет сохранен локально и QR для mailto сформирован."
                 sidebar_status_text.color = ft.colors.ERROR
+                btn_send_email.disabled = True
             else:
                 progress_text.value = "Сбор сетевых настроек и полная маршрутизация..."
                 page.update()
@@ -288,11 +333,15 @@ def main(page: ft.Page):
                     "failed_host_traces": failed_host_traces,
                     "trace_res": trace_res,
                 }
-                report = report_builder.build_full_report(report_context)
-                filepath, filename = save_diagnostic_report(report, name_field.value)
+                report_text = report_builder.build_full_report(report_context)
+                body = "Добрый день.\nВо вложении полный диагностический отчет AURORA.GERMES.\n\n" + report_text
+                filepath, filename = save_diagnostic_report(report_text, name_field.value)
+                latest_online_report = report_text
                 log_to_gui(f"Отчет сохранен: {filename}", ft.colors.GREEN)
-                sidebar_status_text.value = "✅ Диагностика завершена. Отчет сохранен локально."
+                log_to_gui(f"Сопроводительное письмо подготовлено ({len(body)} символов).", ft.colors.BLUE)
+                sidebar_status_text.value = "✅ Диагностика завершена. Можно отправить email с отчетом."
                 sidebar_status_text.color = ft.colors.GREEN
+                btn_send_email.disabled = False
 
         except Exception as e:
             log_to_gui(f"Критическая ошибка: {e}", ft.colors.RED)
@@ -307,12 +356,13 @@ def main(page: ft.Page):
             page.update()
 
     btn_submit = ft.ElevatedButton("Собрать данные и Отправить заявку", icon=ft.Icons.SEND, on_click=run_logic, style=ft.ButtonStyle(bgcolor=ft.colors.BLUE_700, color=ft.colors.WHITE, padding=20, shape=ft.RoundedRectangleBorder(radius=8)))
+    btn_send_email = ft.ElevatedButton("Отправить email", icon=ft.Icons.EMAIL, disabled=True, on_click=send_email_click, style=ft.ButtonStyle(bgcolor=ft.colors.GREEN_700, color=ft.colors.WHITE, padding=20, shape=ft.RoundedRectangleBorder(radius=8)))
 
     main_content = ft.Column([
         header_row, 
         welcome_text, ft.Divider(), remote_ui_section, ft.Divider(),
         ft.Row([name_field, company_field]), ft.Row([phone_field, itsm_field, anydesk_field]), problem_field, ft.Divider(),
-        ft.Column([btn_submit, ft.Row([progress_bar], alignment=ft.MainAxisAlignment.START), progress_text]),
+        ft.Column([ft.Row([btn_submit, btn_send_email], wrap=True), ft.Row([progress_bar], alignment=ft.MainAxisAlignment.START), progress_text]),
         ft.Text("Терминал выполнения:", weight=ft.FontWeight.W_500), log_container
     ], expand=True, scroll=ft.ScrollMode.AUTO) 
 
