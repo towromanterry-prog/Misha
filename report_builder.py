@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 import system_net_tools as snt
+import qr_tools
 
 
 def run_command_args(args: list[str], timeout_sec: int = 15) -> str:
@@ -35,7 +36,7 @@ def extract_first_hops(trace_output: str, max_hops: int = 5) -> str:
 def build_offline_hops_report() -> str:
     """Офлайн-отчёт: только первые 5 хопов до 77.88.8.8, без персональных данных."""
     trace_raw = run_command_args(["tracert", "-d", "-h", "5", "-w", "1000", "77.88.8.8"], timeout_sec=25)
-    hops_block = extract_first_hops(trace_raw, max_hops=5)
+    hops_block = qr_tools.extract_tracert_hops(trace_raw, max_hops=5) or "Не удалось выделить хопы трассировки."
     return "\n".join([
         "🆘 OFFLINE (СЦЕНАРИЙ 3)",
         "--- ТРАССИРОВКА (5 ХОПОВ ДО 77.88.8.8) ---",
