@@ -6,7 +6,7 @@ print('=' * 60)
 
 # Проверка импортов
 print('\n1. Проверка импортов:')
-modules = ['customtkinter', 'requests', 'psutil', 'qrcode', 'dotenv', 'PIL']
+modules = ['customtkinter', 'psutil', 'dotenv']
 for mod in modules:
     try:
         __import__(mod)
@@ -20,10 +20,6 @@ try:
     import config
     print('   ✅ config.py загружается')
     print(f'      APP_TITLE: {config.APP_TITLE}')
-    has_token = bool(config.TG_TOKEN)
-    has_chat = bool(config.TG_CHAT_ID)
-    print(f'      TG_TOKEN: {"✅ установлен" if has_token else "❌ не установлен"}')
-    print(f'      TG_CHAT_ID: {"✅ установлен" if has_chat else "❌ не установлен"}')
 except Exception as e:
     print(f'   ❌ config.py: {str(e)[:50]}')
 
