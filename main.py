@@ -140,11 +140,13 @@ def main(page: ft.Page):
         remote_ui_section = ft.Text("Программы удаленного доступа не найдены", italic=True, color=ft.colors.OUTLINE)
 
     qr_image = ft.Image(width=250, height=250, visible=False, fit=ft.ImageFit.CONTAIN)
+    internet_status_text = ft.Text("Интернет: неизвестно", weight=ft.FontWeight.W_600, color=ft.colors.ON_SURFACE_VARIANT)
     sidebar_status_text = ft.Text("Заполните форму и нажмите кнопку отправки.", text_align=ft.TextAlign.CENTER, color=ft.colors.ON_SURFACE_VARIANT)
     sidebar = ft.Container(
         content=ft.Column([
             ft.Text("Статус", size=20, weight=ft.FontWeight.BOLD),
             ft.Divider(),
+            internet_status_text,
             ft.Container(content=qr_image, alignment=ft.alignment.center),
             ft.Container(content=sidebar_status_text, alignment=ft.alignment.center, padding=ft.padding.only(top=10))
         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
@@ -152,6 +154,32 @@ def main(page: ft.Page):
     )
 
     latest_online_report = ""
+    latest_offline_report = ""
+    is_online = False
+
+    def apply_connectivity_state(online: bool):
+        nonlocal is_online
+        is_online = online
+        if online:
+            internet_status_text.value = "Интернет: есть"
+            internet_status_text.color = ft.colors.GREEN
+            btn_send_email.disabled = not bool(latest_online_report)
+            btn_generate_qr.disabled = True
+        else:
+            internet_status_text.value = "Интернет: нет"
+            internet_status_text.color = ft.colors.RED
+            btn_send_email.disabled = True
+            btn_generate_qr.disabled = not bool(latest_offline_report)
+
+    async def refresh_connectivity_status():
+        check_hosts = ["ya.ru", "help.it-aurora.ru", "pool.ntp.org"]
+        failed_hosts = []
+        for host in check_hosts:
+            status = await run_in_thread(snt.get_ping_status, host)
+            if status != "OK":
+                failed_hosts.append(host)
+        apply_connectivity_state(len(failed_hosts) < 3)
+        return failed_hosts
 
     def save_diagnostic_report(report_text, name):
         date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -165,6 +193,15 @@ def main(page: ft.Page):
         return file_path, filename
 
     async def send_email_click(e):
+        await refresh_connectivity_status()
+        if not is_online:
+            sidebar_status_text.value = "Интернет недоступен. Отправка email запрещена."
+            sidebar_status_text.color = ft.colors.ERROR
+            page.snack_bar = ft.SnackBar(ft.Text("Нет интернета: email не отправлен."), bgcolor=ft.colors.ERROR)
+            page.snack_bar.open = True
+            page.update()
+            return
+
         if not latest_online_report:
             page.snack_bar = ft.SnackBar(ft.Text("Нет онлайн-отчета для отправки."), bgcolor=ft.colors.ORANGE)
             page.snack_bar.open = True
@@ -198,12 +235,48 @@ def main(page: ft.Page):
             sidebar_status_text.color = ft.colors.RED
             page.snack_bar = ft.SnackBar(ft.Text(message), bgcolor=ft.colors.ERROR)
         finally:
-            btn_send_email.disabled = False
+            await refresh_connectivity_status()
             page.snack_bar.open = True
             page.update()
 
+    async def generate_qr_click(e):
+        await refresh_connectivity_status()
+        if is_online:
+            sidebar_status_text.value = "QR недоступен при активном интернете."
+            sidebar_status_text.color = ft.colors.ORANGE
+            page.snack_bar = ft.SnackBar(ft.Text("Интернет доступен: QR не предлагается."), bgcolor=ft.colors.ORANGE)
+            page.snack_bar.open = True
+            page.update()
+            return
+
+        if not latest_offline_report:
+            page.snack_bar = ft.SnackBar(ft.Text("Нет офлайн-отчета для генерации QR."), bgcolor=ft.colors.ORANGE)
+            page.snack_bar.open = True
+            page.update()
+            return
+
+        max_body_len = 1600
+        report_for_mail = latest_offline_report if len(latest_offline_report) <= max_body_len else latest_offline_report[: max_body_len - 22].rstrip() + "\n\n[TRUNCATED]"
+        if len(report_for_mail) < len(latest_offline_report):
+            log_to_gui("⚠️ Текст отчета для mailto был безопасно сокращен.", ft.colors.ORANGE)
+        mailto_url = qr_tools.build_mailto(
+            config.MAIL_TO,
+            "AURORA.GERMES OFFLINE",
+            report_for_mail,
+        )
+        qr_pil = qr_tools.generate_qr_image(mailto_url)
+        qr_buffer = BytesIO()
+        qr_pil.save(qr_buffer, format="PNG")
+        qr_image.src_base64 = base64.b64encode(qr_buffer.getvalue()).decode("utf-8")
+        qr_image.visible = True
+        sidebar_status_text.value = "⚠️ Офлайн-режим: QR для отправки отчета сгенерирован."
+        sidebar_status_text.color = ft.colors.ERROR
+        page.snack_bar = ft.SnackBar(ft.Text("QR сформирован."), bgcolor=ft.colors.GREEN)
+        page.snack_bar.open = True
+        page.update()
+
     async def run_logic(e):
-        nonlocal latest_online_report
+        nonlocal latest_online_report, latest_offline_report
         if not name_field.value or not problem_field.value:
             page.snack_bar = ft.SnackBar(ft.Text("Ошибка: Заполните ФИО и Описание проблемы!"), bgcolor=ft.colors.ERROR)
             page.snack_bar.open = True
@@ -217,7 +290,9 @@ def main(page: ft.Page):
         qr_image.visible = False
         sidebar_status_text.value = "Выполнение диагностики..."
         latest_online_report = ""
+        latest_offline_report = ""
         btn_send_email.disabled = True
+        btn_generate_qr.disabled = True
         sidebar_status_text.color = ft.colors.ON_SURFACE_VARIANT
         log_to_gui("=== Запуск диагностики ===", ft.colors.BLUE)
         page.update()
@@ -242,11 +317,7 @@ def main(page: ft.Page):
             page.update()
             log_to_gui(">>> Предварительный пинг (ya.ru, help.it-aurora.ru, pool.ntp.org)...")
             
-            check_hosts = ["ya.ru", "help.it-aurora.ru", "pool.ntp.org"]
-            failed_hosts = []
-            for host in check_hosts:
-                status = await run_in_thread(snt.get_ping_status, host)
-                if status != "OK": failed_hosts.append(host)
+            failed_hosts = await refresh_connectivity_status()
 
             if len(failed_hosts) == 0:
                 scenario = 1
@@ -264,27 +335,13 @@ def main(page: ft.Page):
                 log_to_gui(">>> Трассировка до 77.88.8.8 (первые 5 хопов)...", ft.colors.BLUE)
                 report = await run_in_thread(report_builder.build_offline_hops_report)
 
-                max_body_len = 1600
-                report_for_mail = report if len(report) <= max_body_len else report[: max_body_len - 22].rstrip() + "\n\n[TRUNCATED]"
-                if len(report_for_mail) < len(report):
-                    log_to_gui("⚠️ Текст отчета для mailto был безопасно сокращен.", ft.colors.ORANGE)
-
-                mailto_url = qr_tools.build_mailto(
-                    config.MAIL_TO,
-                    "AURORA.GERMES OFFLINE",
-                    report_for_mail,
-                )
-                qr_pil = qr_tools.generate_qr_image(mailto_url)
-                qr_buffer = BytesIO()
-                qr_pil.save(qr_buffer, format="PNG")
-                qr_image.src_base64 = base64.b64encode(qr_buffer.getvalue()).decode("utf-8")
-                qr_image.visible = True
-
                 filepath, filename = save_diagnostic_report(report, name_field.value)
+                latest_offline_report = report
                 log_to_gui(f"✅ Отчет сохранен: {filename}", ft.colors.GREEN)
-                sidebar_status_text.value = "⚠️ Нет связи. Отчет сохранен локально и QR для mailto сформирован."
+                sidebar_status_text.value = "⚠️ Нет связи. Отчет сохранен локально, доступна генерация QR."
                 sidebar_status_text.color = ft.colors.ERROR
                 btn_send_email.disabled = True
+                btn_generate_qr.disabled = False
             else:
                 progress_text.value = "Сбор сетевых настроек и полная маршрутизация..."
                 page.update()
@@ -342,12 +399,14 @@ def main(page: ft.Page):
                 sidebar_status_text.value = "✅ Диагностика завершена. Можно отправить email с отчетом."
                 sidebar_status_text.color = ft.colors.GREEN
                 btn_send_email.disabled = False
+                btn_generate_qr.disabled = True
 
         except Exception as e:
             log_to_gui(f"Критическая ошибка: {e}", ft.colors.RED)
             sidebar_status_text.value = "Произошла ошибка!"
             sidebar_status_text.color = ft.colors.RED
         finally:
+            await refresh_connectivity_status()
             progress_bar.visible = False
             progress_text.value = "Диагностика завершена."
             btn_submit.disabled = False
@@ -357,12 +416,13 @@ def main(page: ft.Page):
 
     btn_submit = ft.ElevatedButton("Собрать данные и Отправить заявку", icon=ft.Icons.SEND, on_click=run_logic, style=ft.ButtonStyle(bgcolor=ft.colors.BLUE_700, color=ft.colors.WHITE, padding=20, shape=ft.RoundedRectangleBorder(radius=8)))
     btn_send_email = ft.ElevatedButton("Отправить email", icon=ft.Icons.EMAIL, disabled=True, on_click=send_email_click, style=ft.ButtonStyle(bgcolor=ft.colors.GREEN_700, color=ft.colors.WHITE, padding=20, shape=ft.RoundedRectangleBorder(radius=8)))
+    btn_generate_qr = ft.ElevatedButton("Сгенерировать QR", icon=ft.Icons.QR_CODE, disabled=True, on_click=generate_qr_click, style=ft.ButtonStyle(bgcolor=ft.colors.ORANGE_700, color=ft.colors.WHITE, padding=20, shape=ft.RoundedRectangleBorder(radius=8)))
 
     main_content = ft.Column([
         header_row, 
         welcome_text, ft.Divider(), remote_ui_section, ft.Divider(),
         ft.Row([name_field, company_field]), ft.Row([phone_field, itsm_field, anydesk_field]), problem_field, ft.Divider(),
-        ft.Column([ft.Row([btn_submit, btn_send_email], wrap=True), ft.Row([progress_bar], alignment=ft.MainAxisAlignment.START), progress_text]),
+        ft.Column([ft.Row([btn_submit, btn_send_email, btn_generate_qr], wrap=True), ft.Row([progress_bar], alignment=ft.MainAxisAlignment.START), progress_text]),
         ft.Text("Терминал выполнения:", weight=ft.FontWeight.W_500), log_container
     ], expand=True, scroll=ft.ScrollMode.AUTO) 
 
@@ -422,6 +482,8 @@ def main(page: ft.Page):
         content_diag,
         content_eng
     )
+
+    page.run_task(refresh_connectivity_status)
 
 if __name__ == "__main__":
     ft.app(target=main)
